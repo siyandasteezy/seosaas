@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum Device {
+  DESKTOP
+  MOBILE
+}
+
+enum ScanType {
+  RANKINGS
+  BACKLINKS
+  AUDIT
+  FULL
+}
+
+enum ScanStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ScanFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  MANUAL
+}
+
+enum IssueSeverity {
+  CRITICAL
+  WARNING
+  INFO
+}
+
+enum BacklinkStatus {
+  ACTIVE
+  LOST
+}
+
+enum ReportFormat {
+  PDF
+  CSV
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  name             String?
+  passwordHash     String
+  image            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  memberships      Membership[]
+  googleCredential GoogleCredential?
+  notifications    Notification[]
+  reports          Report[]
+}
+
+model GoogleCredential {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String
+  accessToken  String?
+  expiresAt    DateTime?
+  scope        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  name          String
+  domain        String
+  gscSiteUrl    String?
+  ga4PropertyId String?
+  scanFrequency ScanFrequency @default(WEEKLY)
+  emailAlerts   Boolean       @default(true)
+  lastScanAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  memberships   Membership[]
+  keywords      Keyword[]
+  backlinks     Backlink[]
+  audits        Audit[]
+  reports       Report[]
+  scans         Scan[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+  @@index([projectId])
+}
+
+model Keyword {
+  id        String         @id @default(cuid())
+  projectId String
+  phrase    String
+  country   String         @default("us")
+  device    Device         @default(DESKTOP)
+  createdAt DateTime       @default(now())
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  rankings  RankSnapshot[]
+
+  @@unique([projectId, phrase, country, device])
+  @@index([projectId])
+}
+
+model RankSnapshot {
+  id        String   @id @default(cuid())
+  keywordId String
+  position  Int?
+  url       String?
+  checkedAt DateTime @default(now())
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@index([keywordId, checkedAt])
+}
+
+model Backlink {
+  id           String         @id @default(cuid())
+  projectId    String
+  sourceUrl    String
+  targetUrl    String
+  anchorText   String?
+  domainRating Float?
+  status       BacklinkStatus @default(ACTIVE)
+  firstSeen    DateTime       @default(now())
+  lastSeen     DateTime       @default(now())
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sourceUrl, targetUrl])
+  @@index([projectId])
+}
+
+model Audit {
+  id          String       @id @default(cuid())
+  projectId   String
+  status      ScanStatus   @default(PENDING)
+  score       Int?
+  performance Int?
+  seoScore    Int?
+  startedAt   DateTime     @default(now())
+  completedAt DateTime?
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issues      AuditIssue[]
+
+  @@index([projectId, startedAt])
+}
+
+model AuditIssue {
+  id       String        @id @default(cuid())
+  auditId  String
+  severity IssueSeverity
+  category String
+  message  String
+  url      String?
+  details  String?
+  audit    Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+}
+
+model Scan {
+  id         String     @id @default(cuid())
+  projectId  String
+  type       ScanType
+  status     ScanStatus @default(PENDING)
+  error      String?
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, startedAt])
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  projectId   String
+  title       String
+  format      ReportFormat
+  // Stored in the DB so downloads work on serverless hosts (Netlify/Vercel)
+  // where the filesystem is per-invocation. filePath remains as a legacy
+  // fallback for reports generated before this column existed.
+  content     Bytes?
+  filePath    String?
+  createdById String?
+  createdAt   DateTime     @default(now())
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
