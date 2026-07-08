@@ -20,6 +20,7 @@ services:
     command: npx prisma migrate deploy
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +34,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
       REPORT_STORAGE_DIR: /app/storage/reports
     volumes:
       - reports:/app/storage/reports
@@ -48,6 +50,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/ranklens?schema=public
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -55,7 +55,9 @@ scheduled scans run via a [Netlify scheduled function](netlify/functions/schedul
    command from `netlify.toml` runs `prisma migrate deploy` before `next build`, so tables are
    created automatically on first deploy.
 3. **Environment variables** (Site settings → Environment variables):
-   - `DATABASE_URL` — the hosted Postgres connection string
+   - `DATABASE_URL` — the hosted Postgres connection string (Neon: the **pooled** one)
+   - `DIRECT_URL` — the direct (non-pooled) connection string, used by `prisma migrate`
+     (Neon: same URL without `-pooler` in the hostname)
    - `AUTH_SECRET` — `openssl rand -base64 32`
    - `AUTH_TRUST_HOST` — `true`
    - `NEXT_PUBLIC_APP_URL` — your site URL, e.g. `https://seosaas.netlify.app`

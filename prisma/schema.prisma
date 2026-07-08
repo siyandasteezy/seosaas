@@ -5,6 +5,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Used by prisma migrate. On Neon/Supabase point this at the direct
+  // (non-pooled) endpoint; locally it's the same as DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
