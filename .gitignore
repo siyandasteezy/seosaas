@@ -43,3 +43,6 @@ next-env.d.ts
 
 # RankLens
 storage/
+
+# Local Netlify folder
+.netlify

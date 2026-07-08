@@ -1,5 +1,9 @@
 generator client {
   provider = "prisma-client-js"
+  // "rhel-openssl-3.0.x" is the AWS Lambda runtime used by Netlify/Vercel
+  // functions — required so deploys built on macOS/other platforms ship a
+  // compatible query engine.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
