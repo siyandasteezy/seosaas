@@ -37,8 +37,8 @@ export const POST = withErrorHandling(async (req: NextRequest) => {
   const body = unitSchema.parse(await req.json().catch(() => ({})));
 
   if (body.projectId) {
-    const scanId = await runScan(body.projectId, body.type ?? "FULL");
-    return NextResponse.json({ scanId, status: "COMPLETED" });
+    const { scanId, summary } = await runScan(body.projectId, body.type ?? "FULL");
+    return NextResponse.json({ scanId, status: "COMPLETED", summary });
   }
   const summary = await runDueScheduledScans();
   return NextResponse.json(summary);

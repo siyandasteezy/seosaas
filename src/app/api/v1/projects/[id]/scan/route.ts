@@ -14,6 +14,6 @@ export const POST = withErrorHandling(async (req: NextRequest, { params }: Ctx) 
   const { id } = await params;
   await requireProjectRole(id, "MEMBER");
   const body = scanSchema.parse(await req.json().catch(() => ({})));
-  const scanId = await runScan(id, body.type);
-  return NextResponse.json({ scanId, status: "COMPLETED" }, { status: 201 });
+  const { scanId, summary } = await runScan(id, body.type);
+  return NextResponse.json({ scanId, status: "COMPLETED", summary }, { status: 201 });
 });

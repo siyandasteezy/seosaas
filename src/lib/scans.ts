@@ -30,6 +30,8 @@ export async function runRankingScan(projectId: string) {
   });
   const provider = getSerpProvider();
   const bigMoves: string[] = [];
+  let ranked = 0;
+  let failed = 0;
 
   // Keywords are checked in parallel (bounded) so large projects finish
   // within serverless function time limits. 5 keeps us inside SerpAPI's
@@ -49,6 +51,7 @@ export async function runRankingScan(projectId: string) {
         await prisma.rankSnapshot.create({
           data: { keywordId: keyword.id, position: result.position, url: result.url },
         });
+        if (result.position != null) ranked++;
         if (previous?.position && result.position && Math.abs(previous.position - result.position) >= 5) {
           const dir = result.position < previous.position ? "▲ up" : "▼ down";
           bigMoves.push(
@@ -56,6 +59,7 @@ export async function runRankingScan(projectId: string) {
           );
         }
       } catch (err) {
+        failed++;
         console.error(`[scan] rank check failed for "${keyword.phrase}":`, err);
       }
     }
@@ -70,7 +74,7 @@ export async function runRankingScan(projectId: string) {
       project.emailAlerts
     );
   }
-  return { keywordsChecked: project.keywords.length, bigMoves: bigMoves.length };
+  return { keywordsChecked: project.keywords.length, ranked, failed, bigMoves: bigMoves.length };
 }
 
 export async function runBacklinkScan(projectId: string) {
@@ -216,10 +220,30 @@ export async function runDueScheduledScans() {
  */
 export async function runScan(projectId: string, type: ScanType) {
   const scan = await prisma.scan.create({ data: { projectId, type, status: "RUNNING" } });
+  // A short human-readable summary of what the scan did, surfaced to the UI
+  // so a successful scan that changed nothing still gives clear feedback.
+  const parts: string[] = [];
   try {
-    if (type === "RANKINGS" || type === "FULL") await runRankingScan(projectId);
-    if (type === "BACKLINKS" || type === "FULL") await runBacklinkScan(projectId);
-    if (type === "AUDIT" || type === "FULL") await runAuditScan(projectId);
+    if (type === "RANKINGS" || type === "FULL") {
+      const r = await runRankingScan(projectId);
+      parts.push(
+        r.keywordsChecked === 0
+          ? "No keywords to check"
+          : `Checked ${r.keywordsChecked} keyword${r.keywordsChecked === 1 ? "" : "s"} — ${r.ranked} ranking${r.failed ? `, ${r.failed} failed` : ""}`
+      );
+    }
+    if (type === "BACKLINKS" || type === "FULL") {
+      const b = await runBacklinkScan(projectId);
+      parts.push(
+        "skipped" in b && b.skipped
+          ? "Backlinks skipped (no provider connected)"
+          : `Backlinks: ${b.new} new, ${b.lost} lost`
+      );
+    }
+    if (type === "AUDIT" || type === "FULL") {
+      const a = await runAuditScan(projectId);
+      parts.push(`Audit health ${a.score}/100 (${a.issues} issue${a.issues === 1 ? "" : "s"})`);
+    }
     await prisma.scan.update({
       where: { id: scan.id },
       data: { status: "COMPLETED", finishedAt: new Date() },
@@ -236,5 +260,5 @@ export async function runScan(projectId: string, type: ScanType) {
     });
     throw err;
   }
-  return scan.id;
+  return { scanId: scan.id, summary: parts.join(" · ") };
 }
