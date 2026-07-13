@@ -46,8 +46,10 @@ This starts PostgreSQL, applies migrations, then runs the web app on
 
 The repo ships Netlify-ready ([netlify.toml](netlify.toml) + `@netlify/plugin-nextjs` is
 auto-detected). Because Netlify is serverless, reports are stored in Postgres (not on disk) and
-scheduled scans run via a [Netlify scheduled function](netlify/functions/scheduled-scans.mts)
-(every 6 hours) instead of the long-running worker.
+scheduled scans run via a [GitHub Actions workflow](.github/workflows/scheduled-scans.yml)
+(every 6 hours) that calls the app's `/api/v1/cron` endpoint one scan-phase at a time — each
+request stays inside Netlify's function time limit, and Actions itself has no such limit.
+Set a repo secret named `CRON_SECRET` (same value as the Netlify env var) to enable it.
 
 1. **Database** — create a hosted PostgreSQL instance (e.g. [Neon](https://neon.tech) or
    [Supabase](https://supabase.com); both have free tiers). Copy the connection string.
@@ -61,14 +63,16 @@ scheduled scans run via a [Netlify scheduled function](netlify/functions/schedul
    - `AUTH_SECRET` — `openssl rand -base64 32`
    - `AUTH_TRUST_HOST` — `true`
    - `NEXT_PUBLIC_APP_URL` — your site URL, e.g. `https://seosaas.netlify.app`
-   - `CRON_SECRET` — any long random string (authorizes the scheduled-scan function)
+   - `CRON_SECRET` — any long random string (authorizes the scheduler; also add it as a
+     GitHub Actions repository secret with the same name)
    - Optional: `SERP_PROVIDER`/`SERPAPI_KEY`, `PAGESPEED_API_KEY`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `SMTP_*`
 4. **Google OAuth** (if used) — add `https://<your-site>/api/v1/google/callback` as an authorized
    redirect URI in Google Cloud Console.
 
-Note: Netlify function execution time is capped (~10–26 s on free plans). Full scans of projects
-with many keywords + PageSpeed checks can exceed that — for heavy use, run `npm run worker` on any
-small always-on host (or use Docker) against the same database; the app works identically.
+Note: Netlify function execution time is capped (~26 s). The app is built around that — keyword
+checks run in parallel, full scans are issued phase-by-phase, and PageSpeed is time-boxed — but
+for very large projects you can always run `npm run worker` on a small always-on host (or Docker)
+against the same database; the app works identically.
 
 ## Configuration
 

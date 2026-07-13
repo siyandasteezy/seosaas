@@ -31,31 +31,36 @@ export async function runRankingScan(projectId: string) {
   const provider = getSerpProvider();
   const bigMoves: string[] = [];
 
-  for (const keyword of project.keywords) {
-    const previous = await prisma.rankSnapshot.findFirst({
-      where: { keywordId: keyword.id },
-      orderBy: { checkedAt: "desc" },
-    });
-    try {
-      const result = await provider.checkRank(
-        keyword.phrase,
-        project.domain,
-        keyword.country,
-        keyword.device
-      );
-      await prisma.rankSnapshot.create({
-        data: { keywordId: keyword.id, position: result.position, url: result.url },
-      });
-      if (previous?.position && result.position && Math.abs(previous.position - result.position) >= 5) {
-        const dir = result.position < previous.position ? "▲ up" : "▼ down";
-        bigMoves.push(
-          `"${keyword.phrase}" moved ${dir} from #${previous.position} to #${result.position}`
-        );
+  // Keywords are checked in parallel (bounded) so large projects finish
+  // within serverless function time limits. 5 keeps us inside SerpAPI's
+  // free-plan rate limits.
+  const CONCURRENCY = 5;
+  const queue = [...project.keywords];
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    for (let keyword = queue.shift(); keyword; keyword = queue.shift()) {
+      try {
+        const [previous, result] = await Promise.all([
+          prisma.rankSnapshot.findFirst({
+            where: { keywordId: keyword.id },
+            orderBy: { checkedAt: "desc" },
+          }),
+          provider.checkRank(keyword.phrase, project.domain, keyword.country, keyword.device),
+        ]);
+        await prisma.rankSnapshot.create({
+          data: { keywordId: keyword.id, position: result.position, url: result.url },
+        });
+        if (previous?.position && result.position && Math.abs(previous.position - result.position) >= 5) {
+          const dir = result.position < previous.position ? "▲ up" : "▼ down";
+          bigMoves.push(
+            `"${keyword.phrase}" moved ${dir} from #${previous.position} to #${result.position}`
+          );
+        }
+      } catch (err) {
+        console.error(`[scan] rank check failed for "${keyword.phrase}":`, err);
       }
-    } catch (err) {
-      console.error(`[scan] rank check failed for "${keyword.phrase}":`, err);
     }
-  }
+  });
+  await Promise.all(workers);
 
   if (bigMoves.length > 0) {
     await notifyProject(
@@ -166,20 +171,26 @@ const FREQUENCY_MS: Record<Exclude<ScanFrequency, "MANUAL">, number> = {
   MONTHLY: 30 * 24 * 60 * 60 * 1000,
 };
 
-/**
- * Runs a FULL scan for every project whose scheduled scan is due.
- * Called by the node-cron worker and the Netlify scheduled function
- * (via the /api/v1/cron endpoint).
- */
-export async function runDueScheduledScans() {
+/** Projects whose scheduled scan is due right now. */
+export async function listDueProjects() {
   const projects = await prisma.project.findMany({
     where: { scanFrequency: { not: "MANUAL" } },
   });
   const now = Date.now();
-  const due = projects.filter((p) => {
+  return projects.filter((p) => {
     const interval = FREQUENCY_MS[p.scanFrequency as Exclude<ScanFrequency, "MANUAL">];
     return !p.lastScanAt || now - p.lastScanAt.getTime() >= interval;
   });
+}
+
+/**
+ * Runs a FULL scan for every due project in one process. Used by the
+ * long-running node-cron worker; serverless schedulers should instead call
+ * the /api/v1/cron endpoint per project+type to stay inside time limits.
+ */
+export async function runDueScheduledScans() {
+  const due = await listDueProjects();
+  const checked = await prisma.project.count({ where: { scanFrequency: { not: "MANUAL" } } });
 
   const results: { project: string; ok: boolean }[] = [];
   for (const project of due) {
@@ -191,7 +202,7 @@ export async function runDueScheduledScans() {
       results.push({ project: project.name, ok: false });
     }
   }
-  return { checked: projects.length, due: due.length, results };
+  return { checked, due: due.length, results };
 }
 
 /**

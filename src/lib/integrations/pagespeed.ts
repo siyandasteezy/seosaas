@@ -19,9 +19,12 @@ export async function runPageSpeed(url: string, strategy: "mobile" | "desktop" =
   }
   if (process.env.PAGESPEED_API_KEY) params.set("key", process.env.PAGESPEED_API_KEY);
 
+  // On serverless (Netlify functions ~26s cap) a slow PSI run must not eat
+  // the whole audit budget — give up early and keep the crawl-based checks.
+  const timeoutMs = process.env.NETLIFY ? 15_000 : 120_000;
   const res = await fetch(
     `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${params}`,
-    { signal: AbortSignal.timeout(120_000) }
+    { signal: AbortSignal.timeout(timeoutMs) }
   );
   if (!res.ok) {
     console.error(`[pagespeed] API error ${res.status}: ${await res.text()}`);

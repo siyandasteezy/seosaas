@@ -1,0 +1,42 @@
+name: Scheduled SEO scans
+
+# Drives scheduled scans on the serverless deployment: asks the app which
+# projects are due, then runs each scan phase as its own request so every
+# invocation stays inside Netlify's function time limit.
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run due scans
+        env:
+          BASE_URL: https://seosaas-ranklens.netlify.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          due=$(curl -sf -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL/api/v1/cron" | jq -r '.due[].id')
+          if [ -z "$due" ]; then
+            echo "No projects due for a scan."
+            exit 0
+          fi
+          failures=0
+          for id in $due; do
+            for type in RANKINGS BACKLINKS AUDIT; do
+              echo "::group::project $id — $type"
+              if curl -sf -X POST "$BASE_URL/api/v1/cron" \
+                  -H "Authorization: Bearer $CRON_SECRET" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"projectId\":\"$id\",\"type\":\"$type\"}"; then
+                echo " ✓"
+              else
+                echo " ✗ failed"
+                failures=$((failures+1))
+              fi
+              echo "::endgroup::"
+            done
+          done
+          exit $([ "$failures" -eq 0 ] && echo 0 || echo 1)
