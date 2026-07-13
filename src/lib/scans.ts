@@ -75,7 +75,12 @@ export async function runRankingScan(projectId: string) {
 
 export async function runBacklinkScan(projectId: string) {
   const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
-  const rows = await getBacklinkProvider().fetchBacklinks(project.domain);
+  const provider = getBacklinkProvider();
+  if (!provider) {
+    // No backlink provider configured — skip rather than invent data.
+    return { total: 0, new: 0, lost: 0, skipped: true as const };
+  }
+  const rows = await provider.fetchBacklinks(project.domain);
   const seenKeys = new Set<string>();
   let newLinks = 0;
 

@@ -5,16 +5,61 @@ export interface BacklinkRow {
   domainRating: number;
 }
 
-interface BacklinkProvider {
+export interface BacklinkProvider {
+  readonly name: string;
   fetchBacklinks(domain: string): Promise<BacklinkRow[]>;
 }
 
 /**
- * Demo provider that generates a stable, plausible backlink profile per
- * domain. Swap in a real provider (DataForSEO, Ahrefs API, Majestic) by
- * implementing BacklinkProvider and wiring it in getBacklinkProvider().
+ * Real backlink data via DataForSEO (https://dataforseo.com) — pay-as-you-go,
+ * roughly $0.02 per request. Set BACKLINK_PROVIDER=dataforseo and
+ * DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD.
  */
-const mockProvider: BacklinkProvider = {
+const dataForSeoProvider: BacklinkProvider = {
+  name: "dataforseo",
+  async fetchBacklinks(domain) {
+    const bare = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const auth = Buffer.from(
+      `${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`
+    ).toString("base64");
+
+    const res = await fetch("https://api.dataforseo.com/v3/backlinks/backlinks/live", {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify([
+        { target: bare, mode: "as_is", limit: 100, order_by: ["rank,desc"] },
+      ]),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`DataForSEO error ${res.status}: ${await res.text()}`);
+
+    const data = await res.json();
+    const items = data.tasks?.[0]?.result?.[0]?.items ?? [];
+    return items.map(
+      (it: {
+        url_from?: string;
+        url_to?: string;
+        anchor?: string;
+        domain_from_rank?: number;
+        rank?: number;
+      }) => ({
+        sourceUrl: it.url_from ?? "",
+        targetUrl: it.url_to ?? `https://${bare}/`,
+        anchorText: it.anchor ?? "",
+        // DataForSEO ranks are 0–1000; normalise to a 0–100 domain rating.
+        domainRating: Math.round(((it.domain_from_rank ?? it.rank ?? 0) / 10) * 10) / 10,
+      })
+    );
+  },
+};
+
+/**
+ * Deterministic demo data for showcasing the UI without a paid provider.
+ * Opt in explicitly with BACKLINK_PROVIDER=demo — it is NOT used by default,
+ * so production never shows fabricated backlinks as if they were real.
+ */
+const demoProvider: BacklinkProvider = {
+  name: "demo",
   async fetchBacklinks(domain) {
     const bare = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
     let hash = 0;
@@ -35,12 +80,29 @@ const mockProvider: BacklinkProvider = {
       sourceUrl: `https://${sources[(hash + i) % sources.length]}/post-${(hash % 900) + i}`,
       targetUrl: `https://${bare}/${i % 3 === 0 ? "" : `page-${i}`}`,
       anchorText: anchors[(hash + i) % anchors.length],
-      domainRating: Math.round((((hash >> (i % 16)) % 70) + 10) * 10) / 10,
+      // Unsigned shift (>>>) keeps this in 0–79; `>>` produced negatives.
+      domainRating: Math.round(((hash >>> (i % 16)) % 70) + 10),
     }));
   },
 };
 
-export function getBacklinkProvider(): BacklinkProvider {
-  // BACKLINK_PROVIDER reserved for future real providers (e.g. "dataforseo").
-  return mockProvider;
+/**
+ * Returns the configured backlink provider, or null when none is set up.
+ * A null result means "backlink tracking isn't connected" — the scan records
+ * that and the UI shows a connect-a-provider empty state, rather than
+ * inventing data.
+ */
+export function getBacklinkProvider(): BacklinkProvider | null {
+  switch (process.env.BACKLINK_PROVIDER) {
+    case "dataforseo":
+      if (!process.env.DATAFORSEO_LOGIN || !process.env.DATAFORSEO_PASSWORD) {
+        console.warn("[backlinks] BACKLINK_PROVIDER=dataforseo but credentials missing");
+        return null;
+      }
+      return dataForSeoProvider;
+    case "demo":
+      return demoProvider;
+    default:
+      return null;
+  }
 }

@@ -13,6 +13,7 @@ export default async function BacklinksPage({ params }: { params: Promise<{ id: 
     where: { projectId: id },
     orderBy: [{ status: "asc" }, { domainRating: "desc" }],
   });
+  const providerConfigured = !!process.env.BACKLINK_PROVIDER;
   const active = backlinks.filter((b) => b.status === "ACTIVE");
   const avgDr =
     active.length > 0
@@ -41,7 +42,17 @@ export default async function BacklinksPage({ params }: { params: Promise<{ id: 
         action={role !== "VIEWER" ? <RunScanButton projectId={id} type="BACKLINKS" label="Refresh backlinks" /> : undefined}
       >
         {backlinks.length === 0 ? (
-          <EmptyState title="No backlinks yet" body="Run a backlink scan to discover links pointing at this domain." />
+          providerConfigured ? (
+            <EmptyState
+              title="No backlinks found yet"
+              body="Run a backlink scan to discover links pointing at this domain."
+            />
+          ) : (
+            <EmptyState
+              title="Backlink tracking not connected"
+              body="Backlink discovery needs a data provider (there's no free source). Set BACKLINK_PROVIDER=dataforseo with your DataForSEO credentials to pull real backlinks, or =demo to preview the UI with sample data."
+            />
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
